@@ -1,0 +1,20 @@
+{
+  "name": "Alien Invasion",
+  "short_name": "Alien Invasion",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#e6e6e6",
+  "theme_color": "#222222",
+  "icons": [
+    {
+      "src": "icons/ship.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/alien.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
