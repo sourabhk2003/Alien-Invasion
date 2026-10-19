@@ -6,63 +6,107 @@ from alien import Alien
 from bullet import Bullet
 
 
-_pointer_down = False
-_last_pointer_x = 0
+# Mouse controls for PC
+_mouse_pointer_down = False
+_last_mouse_x = 0
+
+# Touch controls for phones
+_touch_positions = {}
 
 
-def handle_touch_controls(event, ai_settings, screen, ship, bullets):
-    """Tap to fire; drag horizontally to move the ship."""
-    global _pointer_down, _last_pointer_x
+def move_ship_by(ship, screen, delta_x):
+    """Move the ship horizontally and keep it inside the screen."""
+    if hasattr(ship, "center"):
+        half_width = ship.rect.width / 2
+        ship.center += delta_x
+        ship.center = max(
+            half_width,
+            min(ship.center, screen.get_width() - half_width),
+        )
+        ship.rect.centerx = round(ship.center)
+
+    elif hasattr(ship, "x"):
+        ship.x += delta_x
+        ship.x = max(
+            0,
+            min(ship.x, screen.get_width() - ship.rect.width),
+        )
+        ship.rect.x = round(ship.x)
+
+    else:
+        ship.rect.centerx += delta_x
+        ship.rect.clamp_ip(screen.get_rect())
+
+
+def handle_mouse_controls(event, ai_settings, screen, ship, bullets):
+    """On PC, click to fire and drag horizontally to move the ship."""
+    global _mouse_pointer_down, _last_mouse_x
+
+    # Ignore mouse events generated from a touchscreen.
+    # The phone controls are handled by FINGER events below.
+    if getattr(event, "touch", False):
+        return
 
     if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-        _pointer_down = True
-        _last_pointer_x = event.pos[0]
+        _mouse_pointer_down = True
+        _last_mouse_x = event.pos[0]
         fire_bullet(ai_settings, screen, ship, bullets)
 
-    elif event.type == pygame.MOUSEMOTION and _pointer_down:
+    elif event.type == pygame.MOUSEMOTION and _mouse_pointer_down:
         current_x = event.pos[0]
-        delta_x = current_x - _last_pointer_x
-
-        # Support the common Ship class attributes: center or x.
-        if hasattr(ship, "center"):
-            half_width = ship.rect.width / 2
-            ship.center += delta_x
-            ship.center = max(
-                half_width,
-                min(ship.center, screen.get_width() - half_width)
-            )
-            ship.rect.centerx = round(ship.center)
-        elif hasattr(ship, "x"):
-            ship.x += delta_x
-            ship.x = max(
-                0,
-                min(ship.x, screen.get_width() - ship.rect.width)
-            )
-            ship.rect.x = round(ship.x)
-        else:
-            ship.rect.centerx += delta_x
-            ship.rect.clamp_ip(screen.get_rect())
-
-        _last_pointer_x = current_x
+        move_ship_by(ship, screen, current_x - _last_mouse_x)
+        _last_mouse_x = current_x
 
     elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-        _pointer_down = False
+        _mouse_pointer_down = False
+
+
+def handle_finger(event, ai_settings, screen, ship, bullets):
+    """On phones, tap to fire and drag horizontally to move the ship."""
+    finger_id = event.finger_id
+    current_x = int(event.x * screen.get_width())
+
+    if event.type == pygame.FINGERDOWN:
+        _touch_positions[finger_id] = current_x
+        fire_bullet(ai_settings, screen, ship, bullets)
+
+    elif event.type == pygame.FINGERMOTION:
+        if finger_id in _touch_positions:
+            previous_x = _touch_positions[finger_id]
+            move_ship_by(ship, screen, current_x - previous_x)
+            _touch_positions[finger_id] = current_x
+
+    elif event.type == pygame.FINGERUP:
+        _touch_positions.pop(finger_id, None)
 
 
 def check_keydown_events(event, ai_settings, screen, stats, ship, aliens, bullets):
-    """Respond to key presses."""
+    """Respond to keyboard presses."""
     if event.key == pygame.K_RIGHT:
         ship.moving_right = True
+
     elif event.key == pygame.K_LEFT:
         ship.moving_left = True
+
     elif event.key == pygame.K_SPACE:
         fire_bullet(ai_settings, screen, ship, bullets)
+
     elif event.key == pygame.K_q:
         with open("high_score.json", "w") as f:
             json.dump(stats.high_score, f)
         sys.exit()
+
     elif event.key == pygame.K_p and not stats.game_active:
         start_game(ai_settings, screen, stats, ship, aliens, bullets)
+
+
+def check_keyup_events(event, ship):
+    """Respond to keyboard releases."""
+    if event.key == pygame.K_RIGHT:
+        ship.moving_right = False
+
+    elif event.key == pygame.K_LEFT:
+        ship.moving_left = False
 
 
 def fire_bullet(ai_settings, screen, ship, bullets):
@@ -72,16 +116,10 @@ def fire_bullet(ai_settings, screen, ship, bullets):
         bullets.add(new_bullet)
 
 
-def check_keyup_events(event, ship):
-    """Respond to key releases."""
-    if event.key == pygame.K_RIGHT:
-        ship.moving_right = False
-    elif event.key == pygame.K_LEFT:
-        ship.moving_left = False
-
-
 def check_events(ai_settings, screen, stats, sb, play_button, ship, aliens, bullets):
     """Respond to keyboard, mouse, touch, and quit events."""
+    global _mouse_pointer_down
+
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             with open("high_score.json", "w") as f:
@@ -98,33 +136,81 @@ def check_events(ai_settings, screen, stats, sb, play_button, ship, aliens, bull
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
             was_playing = stats.game_active
-            mouse_x, mouse_y = event.pos
 
-            check_play_button(
-                ai_settings, screen, stats, sb, play_button,
-                ship, aliens, bullets, mouse_x, mouse_y
-            )
+            if not getattr(event, "touch", False):
+                mouse_x, mouse_y = event.pos
 
-            # A tap on Play starts the game without firing a bullet.
-            if was_playing:
-                handle_touch_controls(
-                    event, ai_settings, screen, ship, bullets
+                check_play_button(
+                    ai_settings,
+                    screen,
+                    stats,
+                    sb,
+                    play_button,
+                    ship,
+                    aliens,
+                    bullets,
+                    mouse_x,
+                    mouse_y,
                 )
 
+                # Clicking Play starts the game without firing.
+                if was_playing:
+                    handle_mouse_controls(
+                        event, ai_settings, screen, ship, bullets
+                    )
+            else:
+                # Touch-generated mouse event; finger input is handled below.
+                _mouse_pointer_down = False
+
         elif event.type == pygame.MOUSEMOTION:
-            handle_touch_controls(
+            handle_mouse_controls(
                 event, ai_settings, screen, ship, bullets
             )
 
         elif event.type == pygame.MOUSEBUTTONUP:
-            handle_touch_controls(
+            handle_mouse_controls(
+                event, ai_settings, screen, ship, bullets
+            )
+
+        elif event.type == pygame.FINGERDOWN:
+            x = int(event.x * screen.get_width())
+            y = int(event.y * screen.get_height())
+
+            if not stats.game_active:
+                check_play_button(
+                    ai_settings,
+                    screen,
+                    stats,
+                    sb,
+                    play_button,
+                    ship,
+                    aliens,
+                    bullets,
+                    x,
+                    y,
+                )
+            else:
+                handle_finger(
+                    event, ai_settings, screen, ship, bullets
+                )
+
+        elif event.type in (pygame.FINGERMOTION, pygame.FINGERUP):
+            handle_finger(
                 event, ai_settings, screen, ship, bullets
             )
 
 
 def check_play_button(
-    ai_settings, screen, stats, sb, play_button,
-    ship, aliens, bullets, mouse_x, mouse_y
+    ai_settings,
+    screen,
+    stats,
+    sb,
+    play_button,
+    ship,
+    aliens,
+    bullets,
+    mouse_x,
+    mouse_y,
 ):
     """Start a new game when the Play button is clicked or tapped."""
     button_clicked = play_button.rect.collidepoint(mouse_x, mouse_y)
@@ -161,7 +247,14 @@ def start_game(ai_settings, screen, stats, ship, aliens, bullets):
 
 
 def update_screen(
-    ai_settings, screen, stats, sb, ship, aliens, bullets, play_button
+    ai_settings,
+    screen,
+    stats,
+    sb,
+    ship,
+    aliens,
+    bullets,
+    play_button,
 ):
     """Update the display."""
     screen.fill(ai_settings.bg_color)
@@ -237,7 +330,9 @@ def check_bullet_alien_collisions(
 def create_fleet(ai_settings, screen, ship, aliens):
     """Create a full fleet of aliens."""
     alien = Alien(ai_settings, screen)
-    number_aliens_x = get_number_alien_x(ai_settings, alien.rect.width)
+    number_aliens_x = get_number_alien_x(
+        ai_settings, alien.rect.width
+    )
     number_rows = get_number_rows(
         ai_settings, ship.rect.height, alien.rect.height
     )
@@ -245,7 +340,11 @@ def create_fleet(ai_settings, screen, ship, aliens):
     for row_number in range(number_rows):
         for alien_number in range(number_aliens_x):
             create_alien(
-                ai_settings, screen, aliens, alien_number, row_number
+                ai_settings,
+                screen,
+                aliens,
+                alien_number,
+                row_number,
             )
 
 
@@ -302,13 +401,17 @@ def change_fleet_direction(ai_settings, aliens):
     ai_settings.fleet_direction *= -1
 
 
-def check_aliens_bottom(ai_settings, screen, stats, sb, ship, aliens, bullets):
+def check_aliens_bottom(
+    ai_settings, screen, stats, sb, ship, aliens, bullets
+):
     """Treat an alien reaching the bottom as a ship hit."""
     screen_rect = screen.get_rect()
 
     for alien in aliens.sprites():
         if alien.rect.bottom >= screen_rect.bottom:
-            ship_hit(ai_settings, screen, stats, sb, ship, aliens, bullets)
+            ship_hit(
+                ai_settings, screen, stats, sb, ship, aliens, bullets
+            )
             break
 
 
